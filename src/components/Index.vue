@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { ElButton, ElMessage, ElInput, ElTable, ElTableColumn, ElPagination, ElTag, ElTooltip, ElIcon } from 'element-plus'
-// import * as XLSX from 'xlsx'
 import { ref, reactive } from 'vue'
 // @ts-ignore
 import FileSaver from 'file-saver'
 import Excel from 'exceljs'
-import * as moment from 'moment'
+import moment from 'moment'
 import clipboard3 from 'vue-clipboard3'
 
-const templateUrl = '/assets/excel/attendance.xlsx'
+
+let base_url = '/assets/excel/prod/attendance.xlsx'
+if (process.env.NODE_ENV === 'production') {
+  base_url = '/ilan/assets/excel/attendance.xlsx'
+}
+console.log('base_url:', base_url)
+
+const templateUrl = base_url
 const excelInput = ref<HTMLInputElement>();
 const loading = ref(false)  //文件上传loading
 const parsed = ref(false)  //是否已经解析文件并生成数据
@@ -90,8 +96,7 @@ const upload = (rawFile: File) => {
             //name 去除所有不可见字符
             name = name.replace(/[\u0000-\u0019]/g, '')
             if (!sign_data.hasOwnProperty(name)) {
-              //@ts-ignore
-              missing.value.push(name)
+              (missing.value as any).push(name)
               return
             }
             populateRow(name, sign_data, row)
@@ -100,8 +105,8 @@ const upload = (rawFile: File) => {
             let miss_names = missing.value.join(',')
             console.log('打卡原始记录中没有找到员工： ', miss_names)
             ElMessage({
-              message: '打卡原始记录中没有找到如下员工： ' + miss_names,
-              type: 'error',
+              message: '原始打卡记录中没有找到如下员工： ' + miss_names,
+              type: 'warning',
               duration: 8000
             })
 
@@ -212,8 +217,8 @@ const populateRow = (name: any, sign_data: any, row: any) => {
         record_data.sign_in = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
         record_data.sign_out = sign_day.max_time.format('YYYY-MM-DD HH:mm:ss')
       }
-      //@ts-ignore
-      record.value.push(record_data)
+
+      (record.value as any).push(record_data)
     }
     row.getCell(cell_prefix_index + index).value = text
     delete sign_data[name];
@@ -277,20 +282,42 @@ const parseSheet = (sheet: any) => {
   return new Promise((resolve, reject) => {
     try {
       let statsData = {} //统计的打卡数据
-
+      let name_cell_index = 0 //姓名单元格索引
+      let date_cell_index = 0 //日期单元格索引
       sheet.eachRow((row: any, rowIndex: any) => {
-        if (rowIndex === 1) return //skip  header row
-        //@ts-ignore
-        let cell_date = moment(row.getCell(6).value, 'YYYY-MM-DD HH:mm:ss')
+        if (rowIndex === 1) {
+          row.eachCell((cell: any, colIndex: any) => {
+            if (cell.value.trim() === '姓名') {
+              name_cell_index = colIndex
+            } else if (cell.value.trim() === '打卡时间') {
+              date_cell_index = colIndex
+            }
+          })
+          return //skip  header row
+        }
+        if (name_cell_index === 0 || date_cell_index === 0) {
+          reject('获取表头【姓名】【打卡时间】列的位置索引失败 ')
+        }
+        let cell_date_str = row.getCell(date_cell_index).value//日期
+        if (cell_date_str != '' && cell_date_str != null) {
+          cell_date_str = cell_date_str.replace(/-/g, '/').replace(/\s+/g, ' ').trim()  //替换所有的-为/, 中间多个空格替换成1个
+        }
+        // console.log('cell_date_str', cell_date_str)
+        let cell_date = moment(cell_date_str, 'YYYY/MM/DD HH:mm:ss', true) //日期
+        if (!cell_date.isValid())
+          reject('请检查第' + rowIndex + '行打卡时间的日期格式，日期：' + cell_date_str + ' 非YYYY/MM/DD HH:mm:ss格式 ')
         // console.log(row.values, rowIndex)
         //set month when month is null
         let attendance_month = cell_date.get('month') + 1  //月份是零索引的，因此一月是月份 0
+        // console.log('attendance_month', attendance_month)
         let attendance_day = cell_date.get('date')
+        // console.log('attendance_day', attendance_day)
+
         let attendance_hour = cell_date.get('hour')
         if (days_in_month === 0) {
           days_in_month = cell_date.daysInMonth()
         }
-        attendance_date.value ??= cell_date
+        attendance_date.value ??= cell_date as any
         // console.log('attendance_date', attendance_date.value)
         let first_row_month = (attendance_date.value as any).get('month') + 1 //月份是零索引的，因此一月是月份 0
 
@@ -299,10 +326,10 @@ const parseSheet = (sheet: any) => {
           days_in_month = 0
           reject('请检查日期,数据月份不一致：' + first_row_month + '月与 ' + attendance_month + '月')
         }
-        // console.log(attendance_day, attendance_month, days_in_month)
+        console.log(attendance_day, attendance_month, days_in_month)
 
         //根据名字，获取考勤对象，如果不存在，则创建一个新的考勤对象
-        let name = row.getCell(1).value as string
+        let name = row.getCell(name_cell_index).value as string
         name = name.replace(/[\u0000-\u0019]/g, '') //去除掉无效的字符
         if (statsData.hasOwnProperty(name)) {
           var person = (statsData as any)[name]
@@ -455,8 +482,7 @@ const getData = () => {
 
   } else {
     let query_data = record.value.filter(item => {
-      //@ts-ignore
-      return item.name.indexOf(query.name) > -1
+      return (item as any).name.indexOf(query.name) > -1
     })
     pageTotal.value = query_data.length
     tableData.value = query_data.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
@@ -530,7 +556,7 @@ const copy = async (val: any) => {
         浏览上传
       </el-button>
     </div>
-    <div class="note" v-show="missing.length > 0">打卡原始记录中没有找到如下员工：<span style="color:red">{{ missing.join(',') }}</span>
+    <div class="note" v-show="missing.length > 0">原始打卡记录中没有找到如下员工：<span style="color:red">{{ missing.join(',') }}</span>
     </div>
 
   </div>
@@ -609,7 +635,7 @@ const copy = async (val: any) => {
       </el-table-column>
       <el-table-column prop="absence_hours" align="center" width="150rem" label="缺勤时长(<9h)">
       </el-table-column>
-      <el-table-column align="center" :showOverflowTooltip="false">
+      <el-table-column align="center" width="250rem" :showOverflowTooltip="false">
         <template #header>
           <el-tooltip placement="top" effect="dark"
             content="凌晨6点打卡的都算作前天的打卡，可能导致今日的上班打卡被当做昨天的下班打卡，以致工作时长特别夸张，但凡本列不为空的日期，都要女王大人自己人工复查一遍原始打卡记录(尤其是<Strong>今天和前天</Strong>的打卡记录)"
@@ -642,8 +668,8 @@ const copy = async (val: any) => {
 .drop {
   border: 2px dashed #bbb;
   width: 600px;
-  height: 160px;
-  line-height: 160px;
+  height: 120px;
+  line-height: 120px;
   /* margin: 0 auto; */
   font-size: 24px;
   border-radius: 5px;
@@ -656,12 +682,12 @@ const copy = async (val: any) => {
   align-self: center;
   text-align: center;
   position: fixed;
-  right: 15rem;
-  width: 10rem;
+  right: 5rem;
+  width: 20rem;
 }
 
 .container {
-  padding: 30px;
+  padding: 20px 30px 0 30px;
   background: #fff;
   border: 1px solid #ddd;
   border-radius: 5px;
