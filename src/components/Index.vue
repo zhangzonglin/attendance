@@ -326,7 +326,7 @@ const parseSheet = (sheet: any) => {
           days_in_month = 0
           reject('请检查日期,数据月份不一致：' + first_row_month + '月与 ' + attendance_month + '月')
         }
-        console.log(attendance_day, attendance_month, days_in_month)
+        // console.log(attendance_day, attendance_month, days_in_month)
 
         //根据名字，获取考勤对象，如果不存在，则创建一个新的考勤对象
         let name = row.getCell(name_cell_index).value as string
