@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElButton, ElMessage, ElInput, ElTable, ElTableColumn, ElPagination, ElTag, ElTooltip, ElIcon } from 'element-plus'
+import { ElButton, ElMessage, ElInput, ElTable, ElTableColumn, ElPagination, ElTag, ElTooltip, ElIcon, ElSelect, ElOption } from 'element-plus'
 import { ref, reactive } from 'vue'
 // @ts-ignore
 import FileSaver from 'file-saver'
@@ -14,7 +14,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 console.log('base_url:', base_url)
 
-const templateUrl = base_url
+const template_excel_url = base_url
 const excelInput = ref<HTMLInputElement>();
 const loading = ref(false)  //文件上传loading
 const parsed = ref(false)  //是否已经解析文件并生成数据
@@ -23,12 +23,14 @@ const record = ref([])  //解析出来的打卡数据，页面展示用
 const missing = ref([])  //未找到签到数据人员列表，页面展示用
 const cell_prefix_index = 3  //表头行数
 const column_number = 31  //天的总列数
+const specified_work_hours = 9 * 60 //指定的上班时间，单位：分钟
 let days_in_month = 0 //月份天数
 
 const query = reactive({
   name: "",
   pageIndex: 1,
   pageSize: 15,
+  absence: ''
 });//姓名查询
 const tableData = ref([]);
 const pageTotal = ref(0);
@@ -57,7 +59,7 @@ const upload = (rawFile: File) => {
     console.log('sign_data:', sign_data) // 转换成json的数据
 
     var xhr = new XMLHttpRequest();
-    xhr.open('get', templateUrl, true);
+    xhr.open('get', template_excel_url, true);
     xhr.responseType = 'arraybuffer';
 
     xhr.onload = function (e) {
@@ -71,7 +73,7 @@ const upload = (rawFile: File) => {
           if (days_in_month == 0 || attendance_date.value == null) {
             throw new Error("读取Excel失败，月份天数未初始化")
           }
-
+          //初始化表头
           let first_day_of_month = (attendance_date.value as any).startOf('month') //获取该月月初的日期
           for (let index = 1; index <= column_number; index++) {
             if (index <= days_in_month) {
@@ -130,13 +132,13 @@ const upload = (rawFile: File) => {
 
           pageTotal.value = record.value.length
           //初始化分页数据
-          getData();
-
+          handleSearch()
+          console.log('record.value:', record.value)
           workbook.xlsx.writeBuffer().then(function (buffer) {
             var blob = new Blob([buffer], { type: 'application/vnd.ms-excel;charset=utf-8' });
             let file_name = '考勤.xlsx'
             if (attendance_date.value != null) {
-              file_name = `${(attendance_date.value as any).format('YYYY年MM月')}月考勤.xlsx`
+              file_name = `${(attendance_date.value as any).format('YYYY年MM月')}考勤.xlsx`
             }
 
             FileSaver.saveAs(blob, file_name);
@@ -160,74 +162,95 @@ const upload = (rawFile: File) => {
 
 const populateRow = (name: any, sign_data: any, row: any) => {
   var employee = (sign_data as any)[name]
+  let lack_sign_days = 0
   for (let index = 1; index <= days_in_month; index++) {
-    let sign_day = employee.signArrary[index - 1]
-    if (sign_day !== undefined && sign_day !== null) {
-      //出勤总天数
-      if (sign_day.flag == 1 || sign_day.flag == 2) {
-        employee.sign_days++
-      }
-      //餐补总天数
-      if (sign_day.meal_supplement) {
-        employee.supplement_days++
-      }
-    }
-  }
-  for (let index = 1; index <= days_in_month; index++) {
-    let sign_day = employee.signArrary[index - 1]
+    let sign_day = employee.sign_arrary[index - 1]
     let text = '休'
     if (sign_day !== undefined && sign_day !== null) {
       if (sign_day.flag == 1) {
         text = '缺卡'
-      } else if (sign_day.flag == 2) {
+        lack_sign_days++
+      } else {
         text = '√'
-      } else if (sign_day.flag == 3) {
-        text = sign_day.absence
       }
 
       //创建页面展示数据,并保存在数组里
-      let record_data = {
+      let row_data = {
         name: name,
         day: index,   //日期
         sign_in: '', //上班打卡时间              
         sign_out: '',   //下班打卡时间
         flag: sign_day.flag, //打卡标识
-        sign_text: text, //打卡描述
-        sign_days: employee.sign_days ?? 0, //签到天数
-        meal_supplement: sign_day.meal_supplement, //餐补
-        supplement_days: employee.supplement_days ?? 0, //餐补天数
+        sign_text: text, //打卡文本
+        sign_days: employee.sign_days_num, //该月出勤总天数
+        meal_supplement: sign_day.meal_supplement, //今日是否餐补
+        supplement_days: employee.supplement_days_num, //该月餐补总天数
+        makeup_num: sign_day.makeup_num, //今日补卡次数
+        total_makeup_num: employee.total_makeup_num, //该月补卡总次数
         remark: sign_day.remark, //备注
-        work_hours: '', //工作时长
-        absence_hours: sign_day.absence, //缺勤时长
+        work_hours: sign_day.work_hours, //工作时长(分钟)
+        work_hours_text: '', //工作时长(文本)
+        absence_hours: 0, //缺勤时长(分钟)
+        absence_hours_text: '', //缺勤时长(文本)
       }
 
-      if (sign_day.work_hours[0] > 0) {
-        record_data.work_hours = sign_day.work_hours[0] + '小时'
+      row_data.work_hours_text = parseMin2String(sign_day.work_hours)
+
+      //查看工作时长是否超过14小时，超过14则认为数据解析有问题，给老婆预览
+      if (sign_day.work_hours > 14 * 60) {
+        row_data.remark += ' 工作' + row_data.work_hours_text + ','
       }
-      if (sign_day.work_hours[1] > 0) {
-        record_data.work_hours += sign_day.work_hours[1] + '分钟'
-      }
-      if (sign_day.max_time == null) { //flag = 1
-        if (sign_day.min_time.get('hour') >= 18 || sign_day.min_time.get('hour') < 7) {
-          record_data.sign_out = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
-        } else {
-          record_data.sign_in = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
-        }
-      } else {
-        record_data.sign_in = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
-        record_data.sign_out = sign_day.max_time.format('YYYY-MM-DD HH:mm:ss')
+      if (row_data.remark != '') {
+        row_data.remark += ' 跪请女王大人核实!'
       }
 
-      (record.value as any).push(record_data)
+      //计算缺勤时长
+      if (sign_day.work_hours > 0 && sign_day.work_hours < specified_work_hours) {
+        row_data.absence_hours = specified_work_hours - sign_day.work_hours
+        row_data.absence_hours_text = parseMin2String(row_data.absence_hours)
+      }
+      //打卡时间格式
+      row_data.sign_in = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
+      if (sign_day.max_time != null) {
+        row_data.sign_out = sign_day.max_time.format('YYYY-MM-DD HH:mm:ss')
+      }
+
+      (record.value as any).push(row_data)
     }
     row.getCell(cell_prefix_index + index).value = text
-    delete sign_data[name];
   }
+  //考勤扣款
+  if (employee.total_makeup_num > 3) {
+    lack_sign_days += employee.total_makeup_num - 3
+  }
+  if (lack_sign_days > 0) {
+    row.getCell(cell_prefix_index + days_in_month + 5).value = (lack_sign_days * 20).toFixed(2);
+  }
+
   //实际出勤
-  row.getCell(cell_prefix_index + days_in_month + 9).value = employee.sign_days
+  row.getCell(cell_prefix_index + days_in_month + 9).value = employee.sign_days_num
   //餐补天数
-  row.getCell(cell_prefix_index + days_in_month + 12).value = employee.supplement_days
+  if (employee.supplement_days_num > 0) {
+    row.getCell(cell_prefix_index + days_in_month + 12).value = employee.supplement_days_num
+  }
   row.commit()
+  delete sign_data[name]
+
+}
+
+//打卡记录最大也就一天24小时，所以不用考虑跨天的情况
+const parseMin2String = (min: number) => {
+  let work_time = moment.duration(min, 'minutes')
+  let minute = work_time.minutes()
+  let hour = work_time.hours()
+  let text = ''
+  if (hour > 0) {
+    text += hour + 'h'
+  }
+  if (minute > 0) {
+    text += minute + 'm'
+  }
+  return text
 }
 
 const parseWeekByNumber = (number: number) => {
@@ -281,9 +304,10 @@ const readExcel = (rawFile: File) => {
 const parseSheet = (sheet: any) => {
   return new Promise((resolve, reject) => {
     try {
-      let statsData = {} //统计的打卡数据
+      let parsed_data = {} //统计的打卡数据
       let name_cell_index = 0 //姓名单元格索引
       let date_cell_index = 0 //日期单元格索引
+      let source_cell_index = 0 //数据来源单元格索引
       sheet.eachRow((row: any, rowIndex: any) => {
         if (rowIndex === 1) {
           row.eachCell((cell: any, colIndex: any) => {
@@ -291,12 +315,14 @@ const parseSheet = (sheet: any) => {
               name_cell_index = colIndex
             } else if (cell.value.trim() === '打卡时间') {
               date_cell_index = colIndex
+            } else if (cell.value.trim() === '数据来源') {
+              source_cell_index = colIndex
             }
           })
           return //skip  header row
         }
-        if (name_cell_index === 0 || date_cell_index === 0) {
-          reject('获取表头【姓名】【打卡时间】列的位置索引失败 ')
+        if (name_cell_index === 0 || date_cell_index === 0 || source_cell_index === 0) {
+          reject('获取表头【姓名】【打卡时间】【数据来源】列的位置索引失败 ')
         }
         let cell_date_str = row.getCell(date_cell_index).value//日期
         if (cell_date_str != '' && cell_date_str != null) {
@@ -307,7 +333,6 @@ const parseSheet = (sheet: any) => {
         if (!cell_date.isValid())
           reject('请检查第' + rowIndex + '行打卡时间的日期格式，日期：' + cell_date_str + ' 非YYYY/MM/DD HH:mm:ss格式 ')
         // console.log(row.values, rowIndex)
-        //set month when month is null
         let attendance_month = cell_date.get('month') + 1  //月份是零索引的，因此一月是月份 0
         // console.log('attendance_month', attendance_month)
         let attendance_day = cell_date.get('date')
@@ -317,7 +342,7 @@ const parseSheet = (sheet: any) => {
         if (days_in_month === 0) {
           days_in_month = cell_date.daysInMonth()
         }
-        attendance_date.value ??= cell_date as any
+        (attendance_date.value as any) ??= cell_date
         // console.log('attendance_date', attendance_date.value)
         let first_row_month = (attendance_date.value as any).get('month') + 1 //月份是零索引的，因此一月是月份 0
 
@@ -329,15 +354,19 @@ const parseSheet = (sheet: any) => {
         // console.log(attendance_day, attendance_month, days_in_month)
 
         //根据名字，获取考勤对象，如果不存在，则创建一个新的考勤对象
-        let name = row.getCell(name_cell_index).value as string
+        let name = row.getCell(name_cell_index).value
+        if (name === '' || name == null) {
+          reject('第' + rowIndex + '行姓名为空')
+        }
         name = name.replace(/[\u0000-\u0019]/g, '') //去除掉无效的字符
-        if (statsData.hasOwnProperty(name)) {
-          var person = (statsData as any)[name]
+        if (parsed_data.hasOwnProperty(name)) {
+          var employee_records = (parsed_data as any)[name]
         } else {
-          var person: any = {
-            sign_days: 0,
-            signArrary: new Array(days_in_month),
-            supplement_days: 0
+          var employee_records: any = {
+            sign_arrary: new Array(days_in_month), //该月的每日打卡数组
+            sign_days_num: 0,  //该月打卡天数（包括缺卡和正常打卡的）
+            supplement_days_num: 0,  //该月餐补总天数
+            total_makeup_num: 0,  //该月补卡总次数
           }
         }
 
@@ -353,21 +382,22 @@ const parseSheet = (sheet: any) => {
         }
 
         //根据日期索引，获取考勤对象的数组位置，如果不存在，则创建一个新的签到对象
-        let sign_day = person.signArrary[arrary_index]
+        let sign_day = employee_records.sign_arrary[arrary_index]
         if (sign_day === undefined || sign_day === null) { //默认第一条数据的时间为最小时间，后面再跟其他数据比较
           sign_day = {
             min_time: cell_date,
             max_time: null,
-            work_hours: [0, 0],
+            work_hours: 0, //工作时长(分钟)
             meal_supplement: false,
-            flag: 1, //1:打卡一次，2:打卡两次（超过8小时），3:打卡两次（不够8小时，缺勤）
-            absence: '', //缺勤时间
+            makeup_num: 0, //今日补卡次数
+            flag: 1, //1:打卡一次，2:打卡两次(及以上)
             remark: '' //备注（后续根据该字段是否为空，判断要不要把该数据展示在页面上，供老婆参考，比如时间凌晨6点的打卡记录）
           }
-          person.signArrary[arrary_index] = sign_day
+          employee_records.sign_days_num++
+          employee_records.sign_arrary[arrary_index] = sign_day
         } else {
           //比较以及确定最小最大日期
-          if (sign_day.max_time === null) { //说明只有一次打卡记录
+          if (sign_day.max_time === null) { //说明以前只有一次打卡记录
             if (cell_date.isBefore(sign_day.min_time)) { //如果是早于最小时间，则更新最小时间和最晚时间
               let temp_date = sign_day.min_time
               sign_day.min_time = cell_date
@@ -382,79 +412,52 @@ const parseSheet = (sheet: any) => {
               sign_day.max_time = cell_date
             }
           }
-          //如果min_time和max_time的时间差超过8小时，flag设置为2,lack为空字符串，否则flag设置为3，lack为缺卡时间差，格式为：***小时***分钟
-          if (sign_day.max_time !== null) {
-            let diff = sign_day.max_time.diff(sign_day.min_time, 'minutes')
-            // console.log('diff:', diff)
-
-            //计算工作时长
-            let work_time = moment.duration(diff, 'minutes')
-            sign_day.work_hours[0] = work_time.hours()
-            sign_day.work_hours[1] = work_time.minutes()
-
-            //计算是否缺勤
-            if (diff >= (9 * 60)) {//超过9小时的算正常打卡
-              sign_day.flag = 2
-              sign_day.absence = '' //清空，避免多条打卡数据的情况下有脏数据
-            } else {
-              //计算缺勤时间差
-              let time = moment.duration(9 * 60 - diff, 'minutes')
-              let absence = '缺勤'
-              if (time.hours() > 0) {
-                absence += time.hours() + '小时'
-              }
-              if (time.minutes() > 0) {
-                absence += time.minutes() + '分钟'
-              }
-              sign_day.absence = absence
-
-              if (diff >= (8 * 60)) {//超过8小时,但小于9小时（缺勤1小时以内的）的也算正常打卡，但把缺勤时间展示出来，供老婆查看
-                sign_day.flag = 2
-              }
-              // else if (diff < 90 && (sign_day.min_time.get('hour') >= 18 || sign_day.min_time.get('hour') < 7)) {//最大最小相差90分钟以内的，认为是一次打卡，即缺卡
-              //   sign_day.flag = 1
-              // } 
-              else {//不超过8小时的算缺勤，并计算距离规定9小时（缺勤1小时以上的）缺勤多少时间
-                sign_day.flag = 3
-              }
-            }
+          if (sign_day.min_time === null || sign_day.max_time === null) {
+            reject('讲道理，此处逻辑执行不到，且当做测试吧,解析第' + rowIndex + '行时，最大最小时间至少一个为空')
           }
+          //设置打卡状态标志位
+          sign_day.flag = 2
+          //设置工作时长(分钟)
+          sign_day.work_hours = sign_day.max_time.diff(sign_day.min_time, 'minutes')
         }
+        // sign_day.remark = '' //清空，避免某天有多条打卡数据的情况下有脏记录，新的数据会在下面重新计算一遍
+        //补卡次数，每天的和该月总计的
+        let source = row.getCell(source_cell_index).value //数据来源
+        if (source !== null && source !== '' && source.trim() === '补打卡考勤') {
+          sign_day.makeup_num++
+          employee_records.total_makeup_num++
+        }
+
         // console.log('sign_day:', sign_day)
-        //计算是否餐补
-        sign_day.remark = '' //清空，避免多条打卡数据的情况下有脏记录
-        if (sign_day.max_time == null) { //只有一次打卡记录，sign_day.min_time初始化即为cell_date,所以attendance_hour即min_time的时间
-          //8点之前，则包括第二天凌晨的（7点之前，肯定超过晚上20点下班了）和今早8点之前(7点多，包括8点整)，19点之后则是晚上20点之后的（包括8点整）
+        //计算今日是否餐补，和统计到这月餐补总天数，以及凌晨3点到7点打卡的添加到备注里
+        //只有一次打卡记录，sign_day.min_time初始化即为cell_date,所以attendance_hour即min_time的时间
+        if (sign_day.max_time == null) {
+          //8点01分之前，则包括第二天凌晨的（7点之前，肯定超过晚上20点下班了）和今早8点之前(7点多，包括8点整)，19点之后则是晚上20点之后的（包括8点整）
           if (attendance_hour < 8 || (attendance_hour == 8 && cell_date.get('minutes') < 1) || attendance_hour > 19) {
             sign_day.meal_supplement = true
+            employee_records.supplement_days_num++
           }
           //计算是否有凌晨特殊时间打卡的（凌晨4点之后7点之前的）
           if (attendance_hour < 7 && attendance_hour > 3) { //第一条数据的时间小于7点，则认为是下班的打卡记录
-            sign_day.remark = '凌晨' + attendance_hour + '点打卡,行迹十分诡异'
+            sign_day.remark = '凌晨' + attendance_hour + '点打卡,行迹十分诡异,'
           }
         } else {
           let max_hour = sign_day.max_time.get('hour')
           let min_hour = sign_day.min_time.get('hour')
-          let min_minutes = sign_day.min_time.get('minutes')
-          if (max_hour < 8 || max_hour > 19 || min_hour < 8 || (min_hour == 8 && min_minutes < 1)) {
+          //只有在本条打卡记录以前统计的今日无餐补的情况下，才会重新计算是否餐补（只要以前统计的确定餐补了，就算有新的最大或最小时间进来，肯定也是符合餐补规则的<8点01分or>=20点）
+          if (!sign_day.meal_supplement && (max_hour < 8 || max_hour > 19 || min_hour < 8 || (min_hour == 8 && sign_day.min_time.get('minutes') < 1))) {
             sign_day.meal_supplement = true
+            employee_records.supplement_days_num++
           }
-          if (max_hour < 7 && max_hour > 3 && sign_day.remark == '') { //打卡记录在凌晨4之后，7点之前的，特呈于老婆预览
+          if (max_hour < 7 && max_hour > 3) { //打卡记录在凌晨4之后，7点之前的，特呈于老婆预览
             sign_day.remark = '凌晨' + max_hour + '点打卡,行迹诡异,'
           }
         }
-        //查看工作时长是否超过14小时，超过14则认为数据解析有问题，给老婆预览
-        if (sign_day.work_hours[0] > 13) {
-          sign_day.remark += ' 工作' + sign_day.work_hours[0] + '小时,'
-        }
-        if (sign_day.remark != '') {
-          sign_day.remark += '跪请女王大人核实'
-        }
 
-        (statsData as any)[name] = person
+        (parsed_data as any)[name] = employee_records
+        // console.log('parsed_data:', parsed_data)
       })
-      // console.log('statsData:', statsData)
-      resolve(statsData)
+      resolve(parsed_data)
     } catch (error) {
       console.log('error:', error)
       reject(error)
@@ -464,31 +467,55 @@ const parseSheet = (sheet: any) => {
 
 // 查询操作
 const handleSearch = () => {
-  query.pageIndex = 1;
+  query.pageIndex = 1
   query.name = query.name.trim()
-  getData();
-};
+  getData()
+}
 // 分页导航
 const handlePageChange = (val: any) => {
-  query.pageIndex = val;
-  getData();
-};
+  query.pageIndex = val
+  getData()
+}
 
+let query_data = [] as any
+let query_str = ''
 // 获取表格数据
 const getData = () => {
-  if (query.name == '') {
-    pageTotal.value = record.value.length
-    tableData.value = record.value.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
-
-  } else {
-    let query_data = record.value.filter(item => {
-      return (item as any).name.indexOf(query.name) > -1
-    })
-    pageTotal.value = query_data.length
-    tableData.value = query_data.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
-
+  try {
+    console.log('query:', query)
+    if (query.name == '' && query.absence == '') {
+      pageTotal.value = record.value.length
+      tableData.value = record.value.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
+    } else {
+      if (query.name + query.absence != query_str) { //查询条件变化了，重新查询
+        query_str = query.name + query.absence
+        if (query.name != '') {
+          query_data = record.value.filter(item => {
+            return (item as any).name.indexOf(query.name) > -1
+          })
+        }else{
+          query_data = record.value
+        }
+        if (query.absence != '') {
+          let line = 1
+          if (query.absence == '2') {
+            line = 60
+          }
+          //@ts-ignore
+          query_data = query_data.filter((item) => {
+            return item.absence_hours >= line
+          })
+          console.log('query_data:', query_data)
+        }
+      }
+      pageTotal.value = query_data.length
+      tableData.value = query_data.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
+    }
+  } catch (error) {
+    console.log('error:', error)
+    ElMessage.error("页面查询数据出错，联系老公 " + error)
   }
-};
+}
 
 
 const handleClick = () => {
@@ -563,6 +590,11 @@ const copy = async (val: any) => {
   <div style="clear:both"></div>
   <div v-show="parsed" class="container">
     <div class="handle-box">
+      <el-select v-model="query.absence" placeholder="全部" class="handle-select mr10">
+        <el-option key="1" label="全部" value=''></el-option>
+        <el-option key="2" label="缺勤(是)" value='1'></el-option>
+        <el-option key="3" label="缺勤(>1h)" value='2'></el-option>
+      </el-select>
       <el-input v-model="query.name" placeholder="员工名" class="handle-input mr10" @keydown.enter="handleSearch">
       </el-input>
       <el-button type="primary" @click="handleSearch">
@@ -588,9 +620,19 @@ const copy = async (val: any) => {
       <el-table-column align="center" width="70rem" label="日期">
         <template #default="scope">{{ scope.row.day }}号</template>
       </el-table-column>
+      <el-table-column align="center" label="今日补卡(次)">
+        <template #default="scope">
+          <span v-if="scope.row.makeup_num > 0">{{ scope.row.makeup_num }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column align="center" label="今月补卡(次)">
+        <template #default="scope">
+          <span v-if="scope.row.total_makeup_num > 0">{{ scope.row.total_makeup_num }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="sign_days" align="center" width="130rem">
         <template #header>
-          <el-tooltip placement="top" effect="dark" content="只统计打卡状态为'√'和'缺卡'的天数，缺勤1小时的以上未算入" raw-content>
+          <el-tooltip placement="top" effect="dark" content="该日有打卡记录的，统统统计进来" raw-content>
             <span style="vertical-align: middle"> 实际出勤(天) <el-icon style="vertical-align: middle; color: #409EFC">
                 <InfoFilled />
               </el-icon></span>
@@ -600,29 +642,29 @@ const copy = async (val: any) => {
       <el-table-column align="center" width="150rem">
         <template #header>
           <el-tooltip class="item" effect="dark" content="<div>1.凌晨7点以前的打卡，俱算作前一天的打卡</div>
-            <div>2.缺勤1小时以内算正常打卡('√')；1小时以上算缺勤，不计入实际出勤天数</div>" raw-content>
+            <div>2.即使缺勤，也标记为‘√’</div>" raw-content>
             <span style="vertical-align: middle"> 打卡状态 <el-icon style="vertical-align: middle; color: #409EFC">
                 <InfoFilled />
               </el-icon></span>
           </el-tooltip>
         </template>
         <template #default="scope">
-          <el-tag :type="
-            scope.row.flag < 3
-              ? 'success' : 'danger'
-          ">{{ scope.row.sign_text }}</el-tag>
+          <el-tag type="success">{{ scope.row.sign_text }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="sign_in" align="center" max-width="150rem" label="上班打卡">
       </el-table-column>
       <el-table-column prop="sign_out" align="center" max-width="150rem" label="下班打卡">
       </el-table-column>
-      <el-table-column prop="supplement_days" align="center" width="150rem" label="加班餐补天数(天)">
+      <el-table-column align="center" label="餐补天数">
+        <template #default="scope">
+          <span v-if="scope.row.supplement_days > 0">{{ scope.row.supplement_days }}</span>
+        </template>
       </el-table-column>
       <el-table-column align="center" width="100rem">
         <template #header>
           <el-tooltip placement="top" effect="dark" content="早上7点到8点打卡(大于等于7点或小于8点1分)，或者晚上20点以后打卡(大于等于20点)" raw-content>
-            <span style="vertical-align: middle"> 是否餐补 <el-icon style="vertical-align: middle; color: #409EFC">
+            <span style="vertical-align: middle"> 餐补 <el-icon style="vertical-align: middle; color: #409EFC">
                 <InfoFilled />
               </el-icon></span>
           </el-tooltip>
@@ -631,9 +673,19 @@ const copy = async (val: any) => {
           <el-tag v-if="scope.row.meal_supplement" type="success">√</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="work_hours" align="center" width="130rem" label="工作时长">
+      <el-table-column align="center" width="130rem" label="工作时长">
+        <template #default="scope">
+          <span v-if="scope.row.work_hours > 0 && scope.row.work_hours < 11 * 60">{{ scope.row.work_hours_text
+          }}</span>
+          <el-tag v-else-if="scope.row.work_hours >= 11 * 60" type="warning">{{ scope.row.work_hours_text }}</el-tag>
+        </template>
       </el-table-column>
-      <el-table-column prop="absence_hours" align="center" width="150rem" label="缺勤时长(<9h)">
+      <el-table-column align="center" width="150rem" label="缺勤时长(<9h)">
+        <template #default="scope">
+          <span v-if="scope.row.absence_hours > 0 && scope.row.absence_hours < 60">{{ scope.row.absence_hours_text
+          }}</span>
+          <el-tag v-else-if="scope.row.absence_hours >= 60" type="warning">{{ scope.row.absence_hours_text }}</el-tag>
+        </template>
       </el-table-column>
       <el-table-column align="center" width="250rem" :showOverflowTooltip="false">
         <template #header>
@@ -647,7 +699,7 @@ const copy = async (val: any) => {
           </el-tooltip>
         </template>
         <template #default="scope">
-          <el-tag v-if="scope.row.remark != ''" type="warning">！</el-tag>{{ scope.row.remark }}
+          <el-tag v-if="scope.row.remark != ''" type="danger">注意</el-tag>{{ scope.row.remark }}
         </template>
       </el-table-column>
     </el-table>
