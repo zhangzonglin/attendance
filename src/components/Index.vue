@@ -620,26 +620,26 @@ const copy = async (val: any) => {
       <el-table-column align="center" width="70rem" label="日期">
         <template #default="scope">{{ scope.row.day }}号</template>
       </el-table-column>
-      <el-table-column align="center" label="今日补卡(次)">
+      <el-table-column align="center" width="90rem" label="今日补卡">
         <template #default="scope">
           <span v-if="scope.row.makeup_num > 0">{{ scope.row.makeup_num }}</span>
         </template>
       </el-table-column>
-      <el-table-column align="center" label="今月补卡(次)">
+      <el-table-column align="center" width="70rem" label="总补卡">
         <template #default="scope">
           <span v-if="scope.row.total_makeup_num > 0">{{ scope.row.total_makeup_num }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="sign_days" align="center" width="130rem">
+      <el-table-column prop="sign_days" align="center">
         <template #header>
           <el-tooltip placement="top" effect="dark" content="该日有打卡记录的，统统统计进来" raw-content>
-            <span style="vertical-align: middle"> 实际出勤(天) <el-icon style="vertical-align: middle; color: #409EFC">
+            <span style="vertical-align: middle"> 实际出勤 <el-icon style="vertical-align: middle; color: #409EFC">
                 <InfoFilled />
               </el-icon></span>
           </el-tooltip>
         </template>
       </el-table-column>
-      <el-table-column align="center" width="150rem">
+      <el-table-column align="center">
         <template #header>
           <el-tooltip class="item" effect="dark" content="<div>1.凌晨7点以前的打卡，俱算作前一天的打卡</div>
             <div>2.即使缺勤，也标记为‘√’</div>" raw-content>
@@ -652,16 +652,16 @@ const copy = async (val: any) => {
           <el-tag type="success">{{ scope.row.sign_text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="sign_in" align="center" max-width="150rem" label="上班打卡">
+      <el-table-column prop="sign_in" align="center" width="180rem" label="上班打卡">
       </el-table-column>
-      <el-table-column prop="sign_out" align="center" max-width="150rem" label="下班打卡">
+      <el-table-column prop="sign_out" align="center" width="180rem" label="下班打卡">
       </el-table-column>
       <el-table-column align="center" label="餐补天数">
         <template #default="scope">
           <span v-if="scope.row.supplement_days > 0">{{ scope.row.supplement_days }}</span>
         </template>
       </el-table-column>
-      <el-table-column align="center" width="100rem">
+      <el-table-column align="center" width="80rem">
         <template #header>
           <el-tooltip placement="top" effect="dark" content="早上7点到8点打卡(大于等于7点或小于8点1分)，或者晚上20点以后打卡(大于等于20点)" raw-content>
             <span style="vertical-align: middle"> 餐补 <el-icon style="vertical-align: middle; color: #409EFC">
@@ -673,14 +673,14 @@ const copy = async (val: any) => {
           <el-tag v-if="scope.row.meal_supplement" type="success">√</el-tag>
         </template>
       </el-table-column>
-      <el-table-column align="center" width="130rem" label="工作时长">
+      <el-table-column align="center" label="工作时长">
         <template #default="scope">
           <span v-if="scope.row.work_hours > 0 && scope.row.work_hours < 11 * 60">{{ scope.row.work_hours_text
           }}</span>
           <el-tag v-else-if="scope.row.work_hours >= 11 * 60" type="warning">{{ scope.row.work_hours_text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column align="center" width="150rem" label="缺勤时长(<9h)">
+      <el-table-column align="center" label="缺勤时长">
         <template #default="scope">
           <span v-if="scope.row.absence_hours > 0 && scope.row.absence_hours < 60">{{ scope.row.absence_hours_text
           }}</span>
