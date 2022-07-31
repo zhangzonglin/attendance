@@ -44,14 +44,14 @@ const column_number = 31  //天的总列数
 const specified_work_hours = 9 * 60 //指定的上班时间，单位：分钟
 let days_in_month = 0 //月份天数
 
-const defaultSort = ref({ prop: "operTime", order: "descending" }) as any
+const defaultSort = ref({ prop: "work_hours", order: "" }) as any
 const query = reactive({
   name: "",
   pageIndex: 1,
   pageSize: 15,
   hours: '',
   orderColumn: '',
-  isAsc: null
+  isAsc: false,
 });//姓名查询
 const tableData = ref([]);
 const pageTotal = ref(0);
@@ -75,11 +75,11 @@ const upload = (rawFile: File) => {
   parsed.value = false
   //重置查询数据
   query_data = []
-  query_str = ''
+  last_query_str = ''
   query.name = ''
   query.hours = ''
   query.orderColumn = ''
-  query.isAsc = null
+  query.isAsc = false
   //上传文件状态标志,防止重复上传
   loading.value = true
   readExcel(rawFile).then((sign_data: any) => {
@@ -112,6 +112,7 @@ const upload = (rawFile: File) => {
           }
 
           //填充数据
+          let row_number = 0 //excel签到员工的总行数
           worksheet.eachRow((row, rowNumber) => {
             if (rowNumber < 4) {
               return
@@ -126,7 +127,8 @@ const upload = (rawFile: File) => {
               (missing.value as any).push(name)
               return
             }
-            populateRow(name, sign_data, row)
+            populateRow(name, sign_data, row, rowNumber - 3)
+            row_number++
           })
           if (missing.value.length > 0) {
             let miss_names = missing.value.join(',')
@@ -139,6 +141,7 @@ const upload = (rawFile: File) => {
           }
           //列出sign_data对象属性，如果还有的话，说明有模板上未列出的员工，添加进去... 
           //todo 添加代码弄成函数
+          let key_index = 0
           for (let key in sign_data) {
             console.log('key:', key)
             const last_row = worksheet.lastRow;
@@ -151,7 +154,8 @@ const upload = (rawFile: File) => {
             worksheet.insertRow(last_row.number, [], 'i+')
             let new_row = worksheet.getRow(last_row.number)
             new_row.getCell(3).value = key
-            populateRow(key, sign_data, new_row)
+            populateRow(key, sign_data, new_row, row_number + key_index)
+            key_index++
           }
 
           pageTotal.value = record.value.length
@@ -182,7 +186,7 @@ const upload = (rawFile: File) => {
   })
 }
 
-const populateRow = (name: any, sign_data: any, row: any) => {
+const populateRow = (name: any, sign_data: any, row: any, row_number: number) => {
   var employee = (sign_data as any)[name]
   let lack_sign_days = 0
   for (let index = 1; index <= days_in_month; index++) {
@@ -197,7 +201,8 @@ const populateRow = (name: any, sign_data: any, row: any) => {
       }
 
       //创建页面展示数据,并保存在数组里
-      let row_data: IAttendance = {
+      let row_data = <IAttendance>{
+        index: (row_number - 1) * days_in_month + index,
         name: name,
         date: index,
         clock_flag: sign_day.flag,
@@ -319,7 +324,7 @@ const readExcel = (rawFile: File) => {
 interface ClockDay {
   flag: number //1:打卡一次，2:打卡两次(及以上)
   min_time: moment.Moment
-  max_time: moment.Moment|null
+  max_time: moment.Moment | null
   meal_supplement: boolean
   makeup_num: number //今日补卡次数
   work_hours: number //工作时长(分钟)
@@ -503,17 +508,22 @@ const { proxy } = getCurrentInstance() as any
 const resetQuery = () => {
   // dateRange.value = [];
   // proxy.resetForm("queryRef");
-  proxy.$refs["operlogRef"].sort(defaultSort.value.prop, defaultSort.value.order);
+  proxy.$refs["multipleTable"].sort(defaultSort.value.prop, defaultSort.value.order);
+  query.hours = ''
+  query.name = ''
+  query.orderColumn = ''
+  query.isAsc = false
+  last_query_str = ''
+  record.value.sort((a: any, b: any) => {
+    return a.index - b.index
+  })
   handleSearch();
 }
 
 /** 排序触发事件 */
-const handleSortChange = (column: any, prop: any, order: any) => {
-  console.log('column:', column)
-  console.log('prop:', prop)
-  console.log('order:', order)
-  query.orderColumn = column.prop;
-  query.isAsc = column.order;
+const handleSortChange = (column: any) => {
+  query.orderColumn = column.prop
+  query.isAsc = column.order === "ascending" ? true : false
   handleSearch();
 }
 
@@ -530,45 +540,59 @@ const handlePageChange = (val: any) => {
 }
 
 let query_data = [] as any
-let query_str = ''
+let last_query_str = ''
 // 获取表格数据
 const getData = () => {
   try {
-    console.log('query:', query)
-    if (query.name == '' && query.hours == '' && query_data != record.value) {
+    if (query.name == '' && query.hours == '') {
       query_data = record.value
-    } else {
-      if (query.name + query.hours != query_str) { //查询条件变化了，重新查询
-        query_str = query.name + query.hours
+    } else if (query.name + query.hours != last_query_str) { //查询条件变化时，重新查询
+      last_query_str = query.name + '@' + query.hours
+      if (query.hours != '') {
+        let limit = 0
+        let prop = ''
+        if (query.hours == '1' || query.hours == '2') {
+          prop = 'absence_hours'
+          if (query.hours == '1') {
+            limit = 1
+          } else {
+            limit = 60
+          }
+        } else {
+          prop = 'work_hours'
+          if (query.hours == '3') {
+            limit = 9 * 60
+          } else if (query.hours == '4') {
+            limit = 11 * 60
+          } else {
+            limit = 14 * 60
+          }
+        }
+
         if (query.name != '') {
-          query_data = record.value.filter(item => {
-            return (item as any).name.indexOf(query.name) > -1
+          query_data = record.value.filter((item: any) => {
+            return item.name.indexOf(query.name) != -1 && item[prop] >= limit
           })
         } else {
-          query_data = record.value
+          query_data = record.value.filter((item: any) => {
+            return item[prop] >= limit
+          })
         }
-        if (query.hours != '') {
-          if (query.hours == '1' || query.hours == '2') {
-            let line = 1
-            if (query.hours == '2') {
-              line = 60
-            }
-            query_data = query_data.filter((item: any) => {
-              return item.absence_hours >= line
-            })
-          } else {
-            let limit = 11 * 60
-            if (query.hours == '4') {
-              limit = 14 * 60
-            }
-            query_data = query_data.filter((item: any) => {
-              return item.work_hours >= limit
-            })
-          }
-          console.log('query_data:', query_data)
-        }
+      } else { //hours为空, name查询肯定不为空了
+        query_data = record.value.filter(item => {
+          return (item as any).name.indexOf(query.name) != -1
+        })
       }
     }
+    //todo sort
+    if (query.orderColumn != '') {
+      console.log('sort:', query.orderColumn, query.isAsc)
+      query_data.sort((a: any, b: any) => {
+        return query.isAsc ? (a[query.orderColumn] - b[query.orderColumn]) : (b[query.orderColumn] - a[query.orderColumn])
+      })
+    }
+    // console.log('query_data:', query_data)
+
     pageTotal.value = query_data.length
     tableData.value = query_data.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
   } catch (error) {
@@ -579,10 +603,8 @@ const getData = () => {
 
 const tableRowClassName = ({ row, rowIndex }: { row: any, rowIndex: number }) => {
   if (rowIndex % 2 === 1) {
-    console.log('rowIndex style:', rowIndex)
     return 'warning-row'
   }
-  console.log('rowIndex style none:', rowIndex)
   return ''
 }
 
@@ -663,8 +685,9 @@ const copy = async (val: any) => {
         <el-option key="1" label="全部" value=''></el-option>
         <el-option key="2" label="缺勤(是)" value='1'></el-option>
         <el-option key="3" label="缺勤(>1h)" value='2'></el-option>
-        <el-option key="4" label="小加怡情(工作>11h)" value='3'></el-option>
-        <el-option key="5" label="狂加伤肾(工作>14h)" value='4'></el-option>
+        <el-option key="4" label="小加怡情(工作>9h)" value='3'></el-option>
+        <el-option key="5" label="狂加伤肾(工作>11h)" value='4'></el-option>
+        <el-option key="6" label="黑人抬棺(工作>14h)" value='5'></el-option>
       </el-select>
       <el-input v-model="query.name" placeholder="员工名" class="handle-input mr10" @keydown.enter="handleSearch">
       </el-input>
@@ -705,7 +728,7 @@ const copy = async (val: any) => {
       </el-table-column>
       <el-table-column prop="clock_days" align="center">
         <template #header>
-          <el-tooltip placement="top" effect="dark" content="该日有打卡记录的，统统统计进来" raw-content>
+          <el-tooltip placement="bottom" effect="dark" content="该日有打卡记录的，统统统计进来" raw-content>
             <span style="vertical-align: middle"> 实际出勤 <el-icon style="vertical-align: middle; color: #409EFC">
                 <InfoFilled />
               </el-icon></span>
@@ -746,12 +769,14 @@ const copy = async (val: any) => {
           <el-tag v-if="scope.row.meal_supplement" type="success">√</el-tag>
         </template>
       </el-table-column>
-      <el-table-column align="center" label="工作时长" sortable="custom" :sort-orders="['descending', 'ascending']">
+      <el-table-column prop="work_hours" align="center" label="工作时长" sortable="custom"
+        :sort-orders="['descending', 'ascending']">
         <template #default="scope">
           <span v-if="scope.row.work_hours > 0 && scope.row.work_hours < 11 * 60">{{ scope.row.work_hours_text
           }}</span>
           <el-tag v-else-if="scope.row.work_hours >= 11 * 60" type="warning">{{ scope.row.work_hours_text
           }}</el-tag>
+          <span v-else></span>
         </template>
       </el-table-column>
       <el-table-column align="center" label="缺勤时长">
