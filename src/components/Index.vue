@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ElButton, ElMessage, ElInput, ElTable, ElTableColumn, ElPagination, ElTag, ElTooltip, ElIcon, ElSelect, ElOption } from 'element-plus'
-import { ref, reactive } from 'vue'
-// @ts-ignore
-import FileSaver from 'file-saver'
+import { ref, reactive, getCurrentInstance } from 'vue'
+import FileSaver from 'file-saver';
 import Excel from 'exceljs'
 import moment from 'moment'
 import clipboard3 from 'vue-clipboard3'
@@ -12,7 +11,26 @@ let base_url = '/assets/excel/prod/attendance.xlsx'
 if (process.env.NODE_ENV === 'production') {
   base_url = '/ilan/assets/excel/attendance.xlsx'
 }
-console.log('base_url:', base_url)
+
+
+interface IAttendance { //web table展示数据
+  name: string
+  date: number   //日期
+  clock_in_time?: string //上班打卡时间              
+  clock_out_time?: string   //下班打卡时间
+  clock_flag: number //打卡标识 1缺卡 2两次及以上打卡
+  clock_text: string //打卡文本
+  clock_days: number //该月出勤总天数
+  meal_supplement: boolean //今日是否餐补
+  supplement_days: number //该月餐补总天数
+  makeup_num: number //今日补卡次数
+  total_makeup_num: number //该月补卡总次数
+  remark: string //备注
+  work_hours: number //工作时长(分钟)
+  work_hours_text?: string //工作时长(文本)
+  absence_hours?: number //缺勤时长(分钟)
+  absence_hours_text?: string //缺勤时长(文本)
+}
 
 const template_excel_url = base_url
 const excelInput = ref<HTMLInputElement>();
@@ -26,11 +44,14 @@ const column_number = 31  //天的总列数
 const specified_work_hours = 9 * 60 //指定的上班时间，单位：分钟
 let days_in_month = 0 //月份天数
 
+const defaultSort = ref({ prop: "operTime", order: "descending" }) as any
 const query = reactive({
   name: "",
   pageIndex: 1,
   pageSize: 15,
-  absence: ''
+  hours: '',
+  orderColumn: '',
+  isAsc: null
 });//姓名查询
 const tableData = ref([]);
 const pageTotal = ref(0);
@@ -49,19 +70,23 @@ const upload = (rawFile: File) => {
   missing.value = []
   attendance_date.value = null
   days_in_month = 0
-  query.name = ''
   tableData.value = []
   pageTotal.value = 0
   parsed.value = false
+  //重置查询数据
+  query_data = []
+  query_str = ''
+  query.name = ''
+  query.hours = ''
+  query.orderColumn = ''
+  query.isAsc = null
   //上传文件状态标志,防止重复上传
   loading.value = true
   readExcel(rawFile).then((sign_data: any) => {
-    console.log('sign_data:', sign_data) // 转换成json的数据
-
-    var xhr = new XMLHttpRequest();
-    xhr.open('get', template_excel_url, true);
-    xhr.responseType = 'arraybuffer';
-
+    // console.log('sign_data:', sign_data) // 转换成json的数据
+    var xhr = new XMLHttpRequest()
+    xhr.open('get', template_excel_url, true)
+    xhr.responseType = 'arraybuffer'
     xhr.onload = function (e) {
       if (xhr.status == 200) {
         var data = new Uint8Array(xhr.response)
@@ -109,9 +134,8 @@ const upload = (rawFile: File) => {
             ElMessage({
               message: '原始打卡记录中没有找到如下员工： ' + miss_names,
               type: 'warning',
-              duration: 8000
+              duration: 5000
             })
-
           }
           //列出sign_data对象属性，如果还有的话，说明有模板上未列出的员工，添加进去... 
           //todo 添加代码弄成函数
@@ -133,24 +157,22 @@ const upload = (rawFile: File) => {
           pageTotal.value = record.value.length
           //初始化分页数据
           handleSearch()
-          console.log('record.value:', record.value)
+          // console.log('record.value:', record.value)
           workbook.xlsx.writeBuffer().then(function (buffer) {
             var blob = new Blob([buffer], { type: 'application/vnd.ms-excel;charset=utf-8' });
             let file_name = '考勤.xlsx'
             if (attendance_date.value != null) {
               file_name = `${(attendance_date.value as any).format('YYYY年MM月')}考勤.xlsx`
             }
-
-            FileSaver.saveAs(blob, file_name);
-          });
+            FileSaver.saveAs(blob, file_name)
+          })
           parsed.value = true
-
-        });
+        })
       } else {
         throw new Error('读取模板失败')
       }
-    };
-    xhr.send();
+    }
+    xhr.send()
   }).catch(err => {
     parsed.value = false
     console.log(err)
@@ -175,23 +197,18 @@ const populateRow = (name: any, sign_data: any, row: any) => {
       }
 
       //创建页面展示数据,并保存在数组里
-      let row_data = {
+      let row_data: IAttendance = {
         name: name,
-        day: index,   //日期
-        sign_in: '', //上班打卡时间              
-        sign_out: '',   //下班打卡时间
-        flag: sign_day.flag, //打卡标识
-        sign_text: text, //打卡文本
-        sign_days: employee.sign_days_num, //该月出勤总天数
+        date: index,
+        clock_flag: sign_day.flag,
+        clock_text: text, //打卡文本
+        clock_days: employee.sign_days_num, //该月出勤总天数
         meal_supplement: sign_day.meal_supplement, //今日是否餐补
         supplement_days: employee.supplement_days_num, //该月餐补总天数
         makeup_num: sign_day.makeup_num, //今日补卡次数
         total_makeup_num: employee.total_makeup_num, //该月补卡总次数
         remark: sign_day.remark, //备注
-        work_hours: sign_day.work_hours, //工作时长(分钟)
-        work_hours_text: '', //工作时长(文本)
-        absence_hours: 0, //缺勤时长(分钟)
-        absence_hours_text: '', //缺勤时长(文本)
+        work_hours: sign_day.work_hours
       }
 
       row_data.work_hours_text = parseMin2String(sign_day.work_hours)
@@ -210,9 +227,9 @@ const populateRow = (name: any, sign_data: any, row: any) => {
         row_data.absence_hours_text = parseMin2String(row_data.absence_hours)
       }
       //打卡时间格式
-      row_data.sign_in = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
+      row_data.clock_in_time = sign_day.min_time.format('YYYY-MM-DD HH:mm:ss')
       if (sign_day.max_time != null) {
-        row_data.sign_out = sign_day.max_time.format('YYYY-MM-DD HH:mm:ss')
+        row_data.clock_out_time = sign_day.max_time.format('YYYY-MM-DD HH:mm:ss')
       }
 
       (record.value as any).push(row_data)
@@ -299,6 +316,22 @@ const readExcel = (rawFile: File) => {
   })
 }
 
+interface ClockDay {
+  flag: number //1:打卡一次，2:打卡两次(及以上)
+  min_time: moment.Moment
+  max_time: moment.Moment|null
+  meal_supplement: boolean
+  makeup_num: number //今日补卡次数
+  work_hours: number //工作时长(分钟)
+  remark: string //备注（后续根据该字段是否为空，判断要不要把该数据展示在页面上，供老婆参考，比如时间凌晨6点的打卡记录）
+}
+
+interface Employee {
+  sign_arrary: Array<ClockDay> //该月的每日打卡数组
+  sign_days_num: number  //该月打卡天数（包括缺卡和正常打卡的）
+  supplement_days_num: number  //该月餐补总天数
+  total_makeup_num: number  //该月补卡总次数
+}
 
 //函数，解析行数据
 const parseSheet = (sheet: any) => {
@@ -360,9 +393,9 @@ const parseSheet = (sheet: any) => {
         }
         name = name.replace(/[\u0000-\u0019]/g, '') //去除掉无效的字符
         if (parsed_data.hasOwnProperty(name)) {
-          var employee_records = (parsed_data as any)[name]
+          var employee_records: Employee = (parsed_data as any)[name]
         } else {
-          var employee_records: any = {
+          var employee_records: Employee = {
             sign_arrary: new Array(days_in_month), //该月的每日打卡数组
             sign_days_num: 0,  //该月打卡天数（包括缺卡和正常打卡的）
             supplement_days_num: 0,  //该月餐补总天数
@@ -382,7 +415,7 @@ const parseSheet = (sheet: any) => {
         }
 
         //根据日期索引，获取考勤对象的数组位置，如果不存在，则创建一个新的签到对象
-        let sign_day = employee_records.sign_arrary[arrary_index]
+        let sign_day: ClockDay = employee_records.sign_arrary[arrary_index]
         if (sign_day === undefined || sign_day === null) { //默认第一条数据的时间为最小时间，后面再跟其他数据比较
           sign_day = {
             min_time: cell_date,
@@ -465,6 +498,25 @@ const parseSheet = (sheet: any) => {
   })
 }
 
+const { proxy } = getCurrentInstance() as any
+/** 重置按钮操作 */
+const resetQuery = () => {
+  // dateRange.value = [];
+  // proxy.resetForm("queryRef");
+  proxy.$refs["operlogRef"].sort(defaultSort.value.prop, defaultSort.value.order);
+  handleSearch();
+}
+
+/** 排序触发事件 */
+const handleSortChange = (column: any, prop: any, order: any) => {
+  console.log('column:', column)
+  console.log('prop:', prop)
+  console.log('order:', order)
+  query.orderColumn = column.prop;
+  query.isAsc = column.order;
+  handleSearch();
+}
+
 // 查询操作
 const handleSearch = () => {
   query.pageIndex = 1
@@ -483,38 +535,55 @@ let query_str = ''
 const getData = () => {
   try {
     console.log('query:', query)
-    if (query.name == '' && query.absence == '') {
-      pageTotal.value = record.value.length
-      tableData.value = record.value.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
+    if (query.name == '' && query.hours == '' && query_data != record.value) {
+      query_data = record.value
     } else {
-      if (query.name + query.absence != query_str) { //查询条件变化了，重新查询
-        query_str = query.name + query.absence
+      if (query.name + query.hours != query_str) { //查询条件变化了，重新查询
+        query_str = query.name + query.hours
         if (query.name != '') {
           query_data = record.value.filter(item => {
             return (item as any).name.indexOf(query.name) > -1
           })
-        }else{
+        } else {
           query_data = record.value
         }
-        if (query.absence != '') {
-          let line = 1
-          if (query.absence == '2') {
-            line = 60
+        if (query.hours != '') {
+          if (query.hours == '1' || query.hours == '2') {
+            let line = 1
+            if (query.hours == '2') {
+              line = 60
+            }
+            query_data = query_data.filter((item: any) => {
+              return item.absence_hours >= line
+            })
+          } else {
+            let limit = 11 * 60
+            if (query.hours == '4') {
+              limit = 14 * 60
+            }
+            query_data = query_data.filter((item: any) => {
+              return item.work_hours >= limit
+            })
           }
-          //@ts-ignore
-          query_data = query_data.filter((item) => {
-            return item.absence_hours >= line
-          })
           console.log('query_data:', query_data)
         }
       }
-      pageTotal.value = query_data.length
-      tableData.value = query_data.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
     }
+    pageTotal.value = query_data.length
+    tableData.value = query_data.slice((query.pageIndex - 1) * query.pageSize, query.pageIndex * query.pageSize)
   } catch (error) {
     console.log('error:', error)
     ElMessage.error("页面查询数据出错，联系老公 " + error)
   }
+}
+
+const tableRowClassName = ({ row, rowIndex }: { row: any, rowIndex: number }) => {
+  if (rowIndex % 2 === 1) {
+    console.log('rowIndex style:', rowIndex)
+    return 'warning-row'
+  }
+  console.log('rowIndex style none:', rowIndex)
+  return ''
 }
 
 
@@ -571,7 +640,7 @@ const copy = async (val: any) => {
   } catch (error) {
     ElMessage.error("复制失败!!")
   }
-};
+}
 </script>
 
 <template>
@@ -590,10 +659,12 @@ const copy = async (val: any) => {
   <div style="clear:both"></div>
   <div v-show="parsed" class="container">
     <div class="handle-box">
-      <el-select v-model="query.absence" placeholder="全部" class="handle-select mr10">
+      <el-select v-model="query.hours" placeholder="全部" class="handle-select mr10">
         <el-option key="1" label="全部" value=''></el-option>
         <el-option key="2" label="缺勤(是)" value='1'></el-option>
         <el-option key="3" label="缺勤(>1h)" value='2'></el-option>
+        <el-option key="4" label="小加怡情(工作>11h)" value='3'></el-option>
+        <el-option key="5" label="狂加伤肾(工作>14h)" value='4'></el-option>
       </el-select>
       <el-input v-model="query.name" placeholder="员工名" class="handle-input mr10" @keydown.enter="handleSearch">
       </el-input>
@@ -603,9 +674,11 @@ const copy = async (val: any) => {
         </el-icon>
         <span style="vertical-align: middle">搜索</span>
       </el-button>
+      <el-button icon="Refresh" @click="resetQuery">重置</el-button>
     </div>
-    <el-table :data="tableData" :border="true" class="table" ref="multipleTable" header-cell-class-name="table-header">
-      <el-table-column prop="name" align="center" width="50rem" slot="test" label="No.">
+    <el-table :data="tableData" :border="true" class="table" :row-class-name="tableRowClassName" ref="multipleTable"
+      header-cell-class-name="table-header" :default-sort="defaultSort" @sort-change="handleSortChange">
+      <el-table-column prop="name" align="center" width="50rem" label="No.">
         <template #default="scope">
           {{ scope.$index + 1 }}
         </template>
@@ -618,7 +691,7 @@ const copy = async (val: any) => {
         </template>
       </el-table-column>
       <el-table-column align="center" width="70rem" label="日期">
-        <template #default="scope">{{ scope.row.day }}号</template>
+        <template #default="scope">{{ scope.row.date }}号</template>
       </el-table-column>
       <el-table-column align="center" width="90rem" label="今日补卡">
         <template #default="scope">
@@ -630,7 +703,7 @@ const copy = async (val: any) => {
           <span v-if="scope.row.total_makeup_num > 0">{{ scope.row.total_makeup_num }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="sign_days" align="center">
+      <el-table-column prop="clock_days" align="center">
         <template #header>
           <el-tooltip placement="top" effect="dark" content="该日有打卡记录的，统统统计进来" raw-content>
             <span style="vertical-align: middle"> 实际出勤 <el-icon style="vertical-align: middle; color: #409EFC">
@@ -649,12 +722,12 @@ const copy = async (val: any) => {
           </el-tooltip>
         </template>
         <template #default="scope">
-          <el-tag type="success">{{ scope.row.sign_text }}</el-tag>
+          <el-tag type="success">{{ scope.row.clock_text }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="sign_in" align="center" width="180rem" label="上班打卡">
+      <el-table-column prop="clock_in_time" align="center" width="180rem" label="上班打卡">
       </el-table-column>
-      <el-table-column prop="sign_out" align="center" width="180rem" label="下班打卡">
+      <el-table-column prop="clock_out_time" align="center" width="180rem" label="下班打卡">
       </el-table-column>
       <el-table-column align="center" label="餐补天数">
         <template #default="scope">
@@ -673,18 +746,20 @@ const copy = async (val: any) => {
           <el-tag v-if="scope.row.meal_supplement" type="success">√</el-tag>
         </template>
       </el-table-column>
-      <el-table-column align="center" label="工作时长">
+      <el-table-column align="center" label="工作时长" sortable="custom" :sort-orders="['descending', 'ascending']">
         <template #default="scope">
           <span v-if="scope.row.work_hours > 0 && scope.row.work_hours < 11 * 60">{{ scope.row.work_hours_text
           }}</span>
-          <el-tag v-else-if="scope.row.work_hours >= 11 * 60" type="warning">{{ scope.row.work_hours_text }}</el-tag>
+          <el-tag v-else-if="scope.row.work_hours >= 11 * 60" type="warning">{{ scope.row.work_hours_text
+          }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column align="center" label="缺勤时长">
         <template #default="scope">
           <span v-if="scope.row.absence_hours > 0 && scope.row.absence_hours < 60">{{ scope.row.absence_hours_text
           }}</span>
-          <el-tag v-else-if="scope.row.absence_hours >= 60" type="warning">{{ scope.row.absence_hours_text }}</el-tag>
+          <el-tag v-else-if="scope.row.absence_hours >= 60" type="warning">{{ scope.row.absence_hours_text
+          }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column align="center" width="250rem" :showOverflowTooltip="false">
@@ -710,7 +785,7 @@ const copy = async (val: any) => {
   </div>
 </template>
 
-<style scoped>
+<style >
 /* upload button css */
 .excel-upload-input {
   display: none;
@@ -779,5 +854,14 @@ const copy = async (val: any) => {
   margin: 20px 0;
   text-align: right;
   padding: 0;
+}
+
+.el-table .warning-row {
+  --el-table-tr-bg-color: var(--el-color-primary-light-9);
+}
+
+.el-table .success-row {
+  --el-table-tr-bg-color: var(--el-color-success-light-9);
+  background: #e4e7ed;
 }
 </style>
