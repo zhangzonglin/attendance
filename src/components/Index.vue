@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ElButton, ElMessage, ElInput, ElTable, ElTableColumn, ElPagination, ElTag, ElTooltip, ElIcon, ElSelect, ElOption } from 'element-plus'
+import { ElButton, ElMessage, ElInput, ElTable, ElTableColumn, ElPagination, ElTag, ElTooltip, ElIcon, ElSelect, ElOption, ElMessageBox } from 'element-plus'
 import { ref, reactive, getCurrentInstance } from 'vue'
 import FileSaver from 'file-saver';
 import Excel from 'exceljs'
@@ -161,16 +161,31 @@ const upload = (rawFile: File) => {
           pageTotal.value = record.value.length
           //初始化分页数据
           handleSearch()
-          // console.log('record.value:', record.value)
-          workbook.xlsx.writeBuffer().then(function (buffer) {
-            var blob = new Blob([buffer], { type: 'application/vnd.ms-excel;charset=utf-8' });
-            let file_name = '考勤.xlsx'
-            if (attendance_date.value != null) {
-              file_name = `${(attendance_date.value as any).format('YYYY年MM月')}考勤.xlsx`
-            }
-            FileSaver.saveAs(blob, file_name)
-          })
           parsed.value = true
+          // console.log('record.value:', record.value)
+          let file_name = '考勤.xlsx'
+          if (attendance_date.value != null) {
+            file_name = `${(attendance_date.value as any).format('YYYY年MM月')}考勤.xlsx`
+          }
+          // if in wechat browser
+          if (navigator.userAgent.toLowerCase().indexOf('micromessenger') > -1) {
+            ElMessage.error('请用其他浏览器打开该网页，以便下载文件')
+          } else {
+            ElMessageBox.confirm('是否下载文件“' + file_name + '”?', '提示', {
+              confirmButtonText: '确定',
+              cancelButtonText: '取消',
+              type: 'warning'
+            }).then(() => {
+              workbook.xlsx.writeBuffer().then(function (buffer) {
+                var blob = new Blob([buffer], { type: 'application/vnd.ms-excel;charset=utf-8' })
+                FileSaver.saveAs(blob, file_name)
+              })
+            }).catch(() => {
+              ElMessage.info({
+                message: '已取消下载'
+              })
+            })
+          }
         })
       } else {
         throw new Error('读取模板失败')
