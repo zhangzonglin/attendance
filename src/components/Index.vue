@@ -178,7 +178,11 @@ const upload = (rawFile: File) => {
             }).then(() => {
               workbook.xlsx.writeBuffer().then(function (buffer) {
                 var blob = new Blob([buffer], { type: 'application/vnd.ms-excel;charset=utf-8' })
-                FileSaver.saveAs(blob, file_name)
+                try {
+                  FileSaver.saveAs(blob, file_name)
+                } catch (e) {
+                  console.log('saveAs error:', e)
+                }
               })
             }).catch(() => {
               ElMessage.info({
@@ -261,14 +265,14 @@ const populateRow = (name: any, sign_data: any, row: any, row_number: number) =>
     lack_sign_days += employee.total_makeup_num - 3
   }
   if (lack_sign_days > 0) {
-    row.getCell(cell_prefix_index + days_in_month + 5).value = (lack_sign_days * 20).toFixed(2);
+    row.getCell(cell_prefix_index + 31 + 4).value = (lack_sign_days * 20).toFixed(2);
   }
 
   //实际出勤
-  row.getCell(cell_prefix_index + days_in_month + 9).value = employee.sign_days_num
+  row.getCell(cell_prefix_index + 31 + 8).value = employee.sign_days_num
   //餐补天数
   if (employee.supplement_days_num > 0) {
-    row.getCell(cell_prefix_index + days_in_month + 12).value = employee.supplement_days_num
+    row.getCell(cell_prefix_index + 31 + 11).value = employee.supplement_days_num
   }
   row.commit()
   delete sign_data[name]
