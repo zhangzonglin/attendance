@@ -178,11 +178,7 @@ const upload = (rawFile: File) => {
             }).then(() => {
               workbook.xlsx.writeBuffer().then(function (buffer) {
                 var blob = new Blob([buffer], { type: 'application/vnd.ms-excel;charset=utf-8' })
-                try {
-                  FileSaver.saveAs(blob, file_name)
-                } catch (e) {
-                  console.log('saveAs error:', e)
-                }
+                FileSaver.saveAs(blob, file_name)
               })
             }).catch(() => {
               ElMessage.info({
@@ -259,11 +255,12 @@ const populateRow = (name: any, sign_data: any, row: any, row_number: number) =>
       (record.value as any).push(row_data)
     }
     row.getCell(cell_prefix_index + index).value = text
-  }
+  }  
   //考勤扣款
-  if (employee.total_makeup_num > 3) {
-    lack_sign_days += employee.total_makeup_num - 3
-  }
+  //changed on 2022.11.11 不再豁免3次
+  // if (employee.total_makeup_num > 3) {
+  //   lack_sign_days += employee.total_makeup_num - 3
+  // }
   if (lack_sign_days > 0) {
     row.getCell(cell_prefix_index + 31 + 4).value = (lack_sign_days * 20).toFixed(2);
   }
