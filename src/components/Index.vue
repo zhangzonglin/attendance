@@ -259,7 +259,7 @@ const populateRow = (name: any, sign_data: any, row: any, row_number: number) =>
   //考勤扣款
   //changed on 2022.11.11 不再豁免3次
   // if (employee.total_makeup_num > 3) {
-  //   lack_sign_days += employee.total_makeup_num - 3
+    lack_sign_days += employee.total_makeup_num
   // }
   if (lack_sign_days > 0) {
     row.getCell(cell_prefix_index + 31 + 4).value = (lack_sign_days * 20).toFixed(2);
