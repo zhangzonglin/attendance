@@ -172,7 +172,7 @@ const upload = (rawFile: File) => {
             ElMessage.error('请用其他浏览器打开该网页，以便下载文件')
           } else {
             ElMessageBox.confirm('是否下载文件“' + file_name + '”?', '提示', {
-              confirmButtonText: '确定',
+              confirmButtonText: '下载',
               cancelButtonText: '取消',
               type: 'warning'
             }).then(() => {
