@@ -26,3 +26,6 @@ coverage
 *.njsproj
 *.sln
 *.sw?
+
+# files which store locally
+public/assets/excel/prod/*
