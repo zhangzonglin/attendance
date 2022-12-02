@@ -486,8 +486,8 @@ const parseSheet = (sheet: any) => {
         //计算今日是否餐补，和统计到这月餐补总天数，以及凌晨3点到7点打卡的添加到备注里
         //只有一次打卡记录，sign_day.min_time初始化即为cell_date,所以attendance_hour即min_time的时间
         if (sign_day.max_time == null) {
-          //8点01分之前，则包括第二天凌晨的（7点之前，肯定超过晚上20点下班了）和今早8点之前(7点多，包括8点整)，19点之后则是晚上20点之后的（包括8点整）
-          if (attendance_hour < 8 || (attendance_hour == 8 && cell_date.get('minutes') < 1) || attendance_hour > 19) {
+          //8点10分之前，则包括第二天凌晨的（7点之前，肯定超过晚上20点下班了）和今早8点10之前(7点多，包括8点整)，19点之后则是晚上20点之后的（包括8点整）
+          if (attendance_hour < 8 || (attendance_hour == 8 && cell_date.get('minutes') < 11) || attendance_hour > 19) {
             sign_day.meal_supplement = true
             employee_records.supplement_days_num++
           }
